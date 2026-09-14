@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Caminho das Perguntas — VR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script src="game.js" defer></script>
+</head>
+<body>
+  <a-scene renderer="antialias: true" fog="type: linear; color: #8ecae6; near: 25; far: 75">
+
+    <a-assets id="assets" timeout="20000"></a-assets>
+
+    <!-- Céu, sol e chão -->
+    <a-sky color="#8ecae6" segments-width="20" segments-height="12"></a-sky>
+    <a-circle position="14 20 -55" radius="4.5" color="#ffd166"
+              material="shader: flat; fog: false"></a-circle>
+    <a-plane rotation="-90 0 0" width="220" height="260" position="0 0 -40" color="#9caf88"></a-plane>
+    <!-- Rua que atravessa a cidade (as casas do tabuleiro ficam sobre ela) -->
+    <a-plane rotation="-90 0 0" width="4.6" height="96" position="0 0.005 -40.5" color="#4a4e57"></a-plane>
+    <!-- Calçadas -->
+    <a-plane rotation="-90 0 0" width="1.5" height="96" position="-3.05 0.007 -40.5" color="#c2c7cc"></a-plane>
+    <a-plane rotation="-90 0 0" width="1.5" height="96" position="3.05 0.007 -40.5" color="#c2c7cc"></a-plane>
+
+    <a-light type="ambient" intensity="0.65" color="#ffffff"></a-light>
+    <a-light type="directional" intensity="0.7" color="#fff6e0" position="3 8 4"></a-light>
+
+    <!-- Caminho (casas geradas pelo game.js) -->
+    <a-entity id="caminho"></a-entity>
+    <!-- Cidade (prédios, postes, árvores — gerada pelo game.js) -->
+    <a-entity id="cenario"></a-entity>
+
+    <!-- Painel da pergunta: fica sempre à frente da casa atual -->
+    <a-entity id="painel" position="0 1.6 -2.2">
+      <a-plane width="2.8" height="1.9" color="#073b4c" position="0 0 -0.01"></a-plane>
+      <a-plane id="fundo" width="2.6" height="1.7" color="#fffdf7"></a-plane>
+      <a-image id="imgPergunta" width="2.4" height="1.5" position="0 0 0.01"></a-image>
+      <a-entity id="botoes" position="0 -1.15 0"></a-entity>
+      <a-plane id="statusBar" width="2.8" height="0.32" position="0 1.13 -0.005" color="#118ab2"></a-plane>
+      <a-text id="status" value="" align="center" color="#ffffff" width="3.2" position="0 1.13 0.01"></a-text>
+      <!-- Aviso de casa especial (bônus / dica) -->
+      <a-text id="aviso" value="" align="center" color="#ffb703" width="2.4" position="0 0.91 0.02"></a-text>
+      <!-- Placar -->
+      <a-circle id="placarFundo" radius="0.3" color="#ffd166" position="1.55 1.13 0" segments="24"></a-circle>
+      <a-text id="placarTexto" value="0" align="center" color="#073b4c" width="3" position="1.55 1.17 0.01"></a-text>
+      <a-text value="pontos" align="center" color="#073b4c" width="1.2" position="1.55 1.0 0.01"></a-text>
+    </a-entity>
+
+    <!-- Jogador -->
+    <a-entity id="rig" position="0 0 0">
+      <a-entity id="camera" camera look-controls position="0 1.6 0">
+        <!-- Cursor de olhar: funciona no navegador do PC e como fallback no Quest -->
+        <a-entity cursor="fuse: true; fuseTimeout: 1200" raycaster="objects: .clicavel"
+                  position="0 0 -1" geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.02"
+                  material="color: #ffd166; shader: flat"></a-entity>
+      </a-entity>
+      <a-entity laser-controls="hand: right" raycaster="objects: .clicavel; far: 6" line="color: #ffd166"></a-entity>
+      <a-entity laser-controls="hand: left"  raycaster="objects: .clicavel; far: 6" line="color: #ffd166"></a-entity>
+    </a-entity>
+
+    <!-- Cursor de mouse pra testar no PC (não interfere no VR) -->
+    <a-entity cursor="rayOrigin: mouse; fuse: false" raycaster="objects: .clicavel"></a-entity>
+
+  </a-scene>
+</body>
+</html>
