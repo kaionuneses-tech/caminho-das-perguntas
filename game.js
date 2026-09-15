@@ -84,6 +84,92 @@ function salvarNoRank() {
   return salvarEntradaRank({ nome: nomeJogador, pontos, acertos, erros, quando: Date.now() });
 }
 
+// ---------- Rank online (Firestore via REST, compartilhado entre aparelhos) ----------
+// O rank local (localStorage) continua como reserva pra quando estiver sem internet.
+
+const FIRESTORE_URL = 'https://firestore.googleapis.com/v1/projects/caminho-das-perguntas/databases/(default)/documents';
+
+let rankOnline = null;   // cache da última leitura do servidor (null = ainda não carregou)
+
+function obterRank() {
+  return rankOnline || carregarRank();
+}
+
+async function atualizarRankOnline() {
+  try {
+    const resp = await fetch(`${FIRESTORE_URL}:runQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'rank' }],
+          orderBy: [{ field: { fieldPath: 'pontos' }, direction: 'DESCENDING' }],
+          limit: 50,
+        },
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const dados = await resp.json();
+    const lista = dados.filter((d) => d.document).map((d) => {
+      const f = d.document.fields || {};
+      return {
+        docId: d.document.name,
+        nome: f.nome?.stringValue || '?',
+        pontos: parseInt(f.pontos?.integerValue ?? 0, 10),
+        acertos: parseInt(f.acertos?.integerValue ?? 0, 10),
+        erros: parseInt(f.erros?.integerValue ?? 0, 10),
+        quando: parseInt(f.quando?.integerValue ?? 0, 10),
+      };
+    });
+    lista.sort((a, b) => b.pontos - a.pontos || b.acertos - a.acertos || a.quando - b.quando);
+    rankOnline = lista.slice(0, TAM_MAX_RANK);
+  } catch (e) {
+    rankOnline = null;   // sem internet ou bloqueado: as telas usam o rank local
+  }
+  return rankOnline;
+}
+
+// Grava uma entrada no servidor; devolve o id do documento (ou null se falhou)
+async function salvarRankOnline(entrada) {
+  try {
+    const resp = await fetch(`${FIRESTORE_URL}/rank`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          nome: { stringValue: entrada.nome },
+          pontos: { integerValue: String(entrada.pontos) },
+          acertos: { integerValue: String(entrada.acertos) },
+          erros: { integerValue: String(entrada.erros) },
+          quando: { integerValue: String(entrada.quando) },
+        },
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return (await resp.json()).name;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function limparRankOnline() {
+  try {
+    for (let volta = 0; volta < 10; volta++) {
+      const resp = await fetch(`${FIRESTORE_URL}:runQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'rank' }], limit: 100 } }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const docs = (await resp.json()).filter((d) => d.document);
+      if (docs.length === 0) break;
+      await Promise.all(docs.map((d) =>
+        fetch(`https://firestore.googleapis.com/v1/${d.document.name}`, { method: 'DELETE' })));
+    }
+    rankOnline = [];
+  } catch (e) { /* fica só a limpeza local */ }
+}
+
 // ---------- Tela inicial: nome + teclado em VR + rank ----------
 
 // Controla o aviso do painel: texto simples ou faixa colorida com texto branco
@@ -104,10 +190,7 @@ function definirAviso(texto, cor, comFundo) {
 function telaInicial() {
   $('imgPergunta').setAttribute('visible', false);
   $('status').setAttribute('value', 'CAMINHO DAS PERGUNTAS');
-  const rank = carregarRank();
-  definirAviso(rank.length
-    ? `RECORDE: ${rank[0].nome} com ${rank[0].pontos} pts`
-    : 'Seja o primeiro no rank!', '#f8961e', false);
+  mostrarRecordeNoAviso();
   try { nomeJogador = localStorage.getItem(NOME_KEY) || ''; } catch (e) { nomeJogador = ''; }
 
   const tela = document.createElement('a-entity');
@@ -115,6 +198,11 @@ function telaInicial() {
   tela.setAttribute('position', '0 0 0.02');
   $('painel').appendChild(tela);
   mostrarVistaNome();
+
+  // busca o rank online e atualiza a linha do recorde quando chegar
+  atualizarRankOnline().then(() => {
+    if ($('telaInicio') && !$('pontosMestreDisplay')) mostrarRecordeNoAviso();
+  });
 
   // teclado físico do PC também funciona
   window.addEventListener('keydown', aoTeclarNome);
@@ -206,20 +294,21 @@ function mostrarVistaMestre() {
   botaoTecla(tela, 0.55, -0.62, '+10', 0.34, '#06d6a0', ajustar(10));
   botaoTecla(tela, 0.95, -0.62, '+50', 0.34, '#06d6a0', ajustar(50));
 
-  botaoTecla(tela, -0.8, -0.85, 'SALVAR', 0.62, '#06d6a0', () => {
-    salvarEntradaRank({
+  botaoTecla(tela, -0.8, -0.85, 'SALVAR', 0.62, '#06d6a0', async () => {
+    const entrada = {
       nome: nomeJogador || 'MESTRE',
       pontos: pontosMestre,
       acertos: 0,
       erros: 0,
       quando: Date.now(),
-    });
+    };
+    salvarEntradaRank(entrada);          // reserva local
     nomeJogador = '';
     $('status').setAttribute('value', 'CAMINHO DAS PERGUNTAS');
-    mostrarRecordeNoAviso();
-    mostrarVistaRank();
+    await salvarRankOnline(entrada);     // rank compartilhado
+    mostrarVistaRank().then(mostrarRecordeNoAviso);
   });
-  botaoTecla(tela, 0.05, -0.85, 'LIMPAR RANK', 0.86, '#f8961e', function aoLimpar() {
+  botaoTecla(tela, 0.05, -0.85, 'LIMPAR RANK', 0.86, '#f8961e', async function aoLimpar() {
     const botao = this;
     const texto = botao.querySelector('a-text');
     if (texto.getAttribute('value') === 'LIMPAR RANK') {
@@ -228,6 +317,8 @@ function mostrarVistaMestre() {
       botao.setAttribute('color', '#ef476f');
     } else {
       try { localStorage.removeItem(RANK_KEY); } catch (e) { /* ok */ }
+      texto.setAttribute('value', 'LIMPANDO...');
+      await limparRankOnline();
       mostrarRecordeNoAviso();
       texto.setAttribute('value', 'LIMPAR RANK');
       botao.setAttribute('color', '#f8961e');
@@ -241,26 +332,47 @@ function mostrarVistaMestre() {
 }
 
 function mostrarRecordeNoAviso() {
-  const rank = carregarRank();
+  const rank = obterRank();
   definirAviso(rank.length
     ? `RECORDE: ${rank[0].nome} com ${rank[0].pontos} pts`
     : 'Seja o primeiro no rank!', '#f8961e', false);
 }
 
-// Vista 2 da tela inicial: quadro do rank
-function mostrarVistaRank() {
+// Vista 2 da tela inicial: quadro do rank (busca a versão online antes de mostrar)
+async function mostrarVistaRank() {
   const tela = $('telaInicio');
   tela.innerHTML = '';
-  const quadro = montarPainelRank(-1);
+  botaoTecla(tela, 0, -0.78, 'VOLTAR', 0.85, '#118ab2', mostrarVistaNome);
+
+  const carregando = document.createElement('a-text');
+  carregando.setAttribute('id', 'rankCarregando');
+  carregando.setAttribute('value', 'Carregando rank online...');
+  carregando.setAttribute('align', 'center');
+  carregando.setAttribute('color', '#073b4c');
+  carregando.setAttribute('width', 2);
+  carregando.setAttribute('position', '0 0.05 0');
+  tela.appendChild(carregando);
+
+  await atualizarRankOnline();
+  if (!$('rankCarregando')) return;   // jogador já saiu desta vista
+  tela.removeChild(carregando);
+  const quadro = montarPainelRank(-1, obterRank());
   quadro.setAttribute('position', '0 0.02 0');
   tela.appendChild(quadro);
-  botaoTecla(tela, 0, -0.78, 'VOLTAR', 0.85, '#118ab2', mostrarVistaNome);
+  if (!rankOnline) {
+    const avisoOffline = document.createElement('a-text');
+    avisoOffline.setAttribute('value', 'Sem internet: mostrando o rank deste aparelho');
+    avisoOffline.setAttribute('align', 'center');
+    avisoOffline.setAttribute('color', '#ef476f');
+    avisoOffline.setAttribute('width', 1.6);
+    avisoOffline.setAttribute('position', '0 -0.6 0');
+    tela.appendChild(avisoOffline);
+  }
 }
 
 // Quadro decorado do rank: título dourado, medalhas ouro/prata/bronze e
 // a linha do jogador destacada em verde. destaque = posição a marcar (-1: nenhuma).
-function montarPainelRank(destaque) {
-  const rank = carregarRank();
+function montarPainelRank(destaque, rank) {
   const cont = document.createElement('a-entity');
   cont.setAttribute('id', 'painelRank');
 
@@ -809,15 +921,38 @@ function fimDeJogo() {
   $('statusBar').setAttribute('visible', false);
   definirAviso('', '#f8961e', false);
 
-  const posicao = salvarNoRank();
   $('status').setAttribute('value', `Fim de jogo, ${nomeJogador}!\nPontos: ${pontos}   Acertos: ${acertos}   Erros: ${erros}`);
   $('status').setAttribute('position', '0 0.68 0.02');
   $('status').setAttribute('color', '#073b4c');
   $('status').setAttribute('width', 2.2);
 
-  const quadro = montarPainelRank(posicao);
-  quadro.setAttribute('position', '0 -0.14 0.02');
-  $('painel').appendChild(quadro);
+  // salva local (reserva) e online, depois mostra o quadro com a posição real
+  const entrada = { nome: nomeJogador, pontos, acertos, erros, quando: Date.now() };
+  const posicaoLocal = salvarEntradaRank(entrada);
+  const salvando = document.createElement('a-text');
+  salvando.setAttribute('value', 'Salvando no rank online...');
+  salvando.setAttribute('align', 'center');
+  salvando.setAttribute('color', '#073b4c');
+  salvando.setAttribute('width', 2);
+  salvando.setAttribute('position', '0 -0.1 0.02');
+  $('painel').appendChild(salvando);
+
+  (async () => {
+    const docId = await salvarRankOnline(entrada);
+    await atualizarRankOnline();
+    $('painel').removeChild(salvando);
+    let rank, destaque;
+    if (docId && rankOnline) {
+      rank = rankOnline;
+      destaque = rank.findIndex((r) => r.docId === docId);
+    } else {
+      rank = carregarRank();
+      destaque = posicaoLocal;
+    }
+    const quadro = montarPainelRank(destaque, rank);
+    quadro.setAttribute('position', '0 -0.14 0.02');
+    $('painel').appendChild(quadro);
+  })();
 
   const botoes = $('botoes');
   botoes.innerHTML = '';
