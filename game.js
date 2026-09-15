@@ -1,5 +1,5 @@
 // Caminho das Perguntas — lógica base
-// Regras: acerto avança 1 casa (+2 pontos); erro recua 1 casa (+1 ponto de consolação).
+// Regras: acerto avança 1 casa (+2 pontos); erro recua 1 casa (-1 ponto, pode ficar negativo).
 // As perguntas saem embaralhadas de um "baralho": ao voltar numa casa, vem pergunta nova.
 // Casas especiais (sorteadas a cada partida): BÔNUS (acerto vale 2 pontos) e DICA
 // (elimina alternativas erradas da pergunta daquela casa).
@@ -17,7 +17,7 @@ const QTD_CASAS_BONUS = 4;
 const QTD_CASAS_DICA = 4;
 const PONTOS_ACERTO = 2;
 const PONTOS_ACERTO_BONUS = 4;  // casa bônus: acerto vale o dobro
-const PONTOS_ERRO_GANHO = 1;    // errou, mas leva 1 ponto de consolação
+const PONTOS_ERRO = 1;          // quanto se perde ao errar
 const DURACAO_PULO = 650;       // ms
 const ALTURA_PULO = 0.5;        // metros
 
@@ -852,9 +852,9 @@ function responder(letra, botao) {
     acertos++;
     $('status').setAttribute('value', `Correto! +${ganho} ponto${ganho > 1 ? 's' : ''}`);
   } else {
-    pontos += PONTOS_ERRO_GANHO;
+    pontos -= PONTOS_ERRO;
     erros++;
-    $('status').setAttribute('value', `Errou! Mas leva +${PONTOS_ERRO_GANHO} ponto. Voltando...`);
+    $('status').setAttribute('value', `Errou! -${PONTOS_ERRO} ponto. Voltando...`);
   }
   atualizarPlacar();
 
