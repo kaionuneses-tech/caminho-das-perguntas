@@ -1,5 +1,5 @@
 // Caminho das Perguntas — lógica base
-// Regras: acerto avança 1 casa (+1 ponto); erro recua 1 casa (-2 pontos, pode ficar negativo).
+// Regras: acerto avança 1 casa (+2 pontos); erro recua 1 casa (+1 ponto de consolação).
 // As perguntas saem embaralhadas de um "baralho": ao voltar numa casa, vem pergunta nova.
 // Casas especiais (sorteadas a cada partida): BÔNUS (acerto vale 2 pontos) e DICA
 // (elimina alternativas erradas da pergunta daquela casa).
@@ -15,9 +15,9 @@ const COR_CASA_BONUS = '#ffd700';
 const COR_CASA_DICA = '#00b4d8';
 const QTD_CASAS_BONUS = 4;
 const QTD_CASAS_DICA = 4;
-const PONTOS_ACERTO = 1;
-const PONTOS_ACERTO_BONUS = 2;
-const PONTOS_ERRO = 2;          // quanto se perde ao errar
+const PONTOS_ACERTO = 2;
+const PONTOS_ACERTO_BONUS = 4;  // casa bônus: acerto vale o dobro
+const PONTOS_ERRO_GANHO = 1;    // errou, mas leva 1 ponto de consolação
 const DURACAO_PULO = 650;       // ms
 const ALTURA_PULO = 0.5;        // metros
 
@@ -79,23 +79,46 @@ function salvarNoRank() {
   return posicao;
 }
 
-// ---------- Tela inicial: nome + teclado em VR ----------
+// ---------- Tela inicial: nome + teclado em VR + rank ----------
+
+// Controla o aviso do painel: texto simples ou faixa colorida com texto branco
+function definirAviso(texto, cor, comFundo) {
+  const aviso = $('aviso');
+  const fundo = $('avisoFundo');
+  aviso.setAttribute('value', texto);
+  if (comFundo) {
+    aviso.setAttribute('color', '#ffffff');
+    fundo.setAttribute('color', cor);
+    fundo.setAttribute('visible', true);
+  } else {
+    aviso.setAttribute('color', cor);
+    fundo.setAttribute('visible', false);
+  }
+}
 
 function telaInicial() {
   $('imgPergunta').setAttribute('visible', false);
   $('status').setAttribute('value', 'CAMINHO DAS PERGUNTAS');
   const rank = carregarRank();
-  const aviso = $('aviso');
-  aviso.setAttribute('color', '#f8961e');
-  aviso.setAttribute('value', rank.length
+  definirAviso(rank.length
     ? `RECORDE: ${rank[0].nome} com ${rank[0].pontos} pts`
-    : 'Seja o primeiro no rank!');
+    : 'Seja o primeiro no rank!', '#f8961e', false);
   try { nomeJogador = localStorage.getItem(NOME_KEY) || ''; } catch (e) { nomeJogador = ''; }
 
   const tela = document.createElement('a-entity');
   tela.setAttribute('id', 'telaInicio');
   tela.setAttribute('position', '0 0 0.02');
   $('painel').appendChild(tela);
+  mostrarVistaNome();
+
+  // teclado físico do PC também funciona
+  window.addEventListener('keydown', aoTeclarNome);
+}
+
+// Vista 1 da tela inicial: digitar o nome
+function mostrarVistaNome() {
+  const tela = $('telaInicio');
+  tela.innerHTML = '';
 
   const rotulo = document.createElement('a-text');
   rotulo.setAttribute('value', 'Digite seu nome:');
@@ -132,10 +155,109 @@ function telaInicial() {
     nomeJogador = nomeJogador.slice(0, -1);
     atualizarNomeDisplay();
   });
-  botaoTecla(tela, 0, -0.78, 'JOGAR', 0.9, '#06d6a0', iniciarJogo);
+  botaoTecla(tela, -0.35, -0.78, 'JOGAR', 0.85, '#06d6a0', iniciarJogo);
+  botaoTecla(tela, 0.55, -0.78, 'VER RANK', 0.7, '#f8961e', mostrarVistaRank);
+}
 
-  // teclado físico do PC também funciona
-  window.addEventListener('keydown', aoTeclarNome);
+// Vista 2 da tela inicial: quadro do rank
+function mostrarVistaRank() {
+  const tela = $('telaInicio');
+  tela.innerHTML = '';
+  const quadro = montarPainelRank(-1);
+  quadro.setAttribute('position', '0 0.02 0');
+  tela.appendChild(quadro);
+  botaoTecla(tela, 0, -0.78, 'VOLTAR', 0.85, '#118ab2', mostrarVistaNome);
+}
+
+// Quadro decorado do rank: título dourado, medalhas ouro/prata/bronze e
+// a linha do jogador destacada em verde. destaque = posição a marcar (-1: nenhuma).
+function montarPainelRank(destaque) {
+  const rank = carregarRank();
+  const cont = document.createElement('a-entity');
+  cont.setAttribute('id', 'painelRank');
+
+  const titulo = document.createElement('a-plane');
+  titulo.setAttribute('width', 1.6);
+  titulo.setAttribute('height', 0.26);
+  titulo.setAttribute('color', '#ffd700');
+  titulo.setAttribute('position', '0 0.45 0');
+  const tituloTexto = document.createElement('a-text');
+  tituloTexto.setAttribute('value', 'RANKING');
+  tituloTexto.setAttribute('align', 'center');
+  tituloTexto.setAttribute('color', '#073b4c');
+  tituloTexto.setAttribute('width', 3.4);
+  tituloTexto.setAttribute('position', '0 0 0.01');
+  titulo.appendChild(tituloTexto);
+  cont.appendChild(titulo);
+
+  if (rank.length === 0) {
+    const vazio = document.createElement('a-text');
+    vazio.setAttribute('value', 'Ainda nao tem ninguem aqui.\nJogue e seja o primeiro!');
+    vazio.setAttribute('align', 'center');
+    vazio.setAttribute('color', '#073b4c');
+    vazio.setAttribute('width', 2);
+    vazio.setAttribute('position', '0 0.05 0');
+    cont.appendChild(vazio);
+    return cont;
+  }
+
+  const MEDALHAS = ['#ffd700', '#c0c0c0', '#cd7f32'];
+  const linha = (posicao, r, y, ehVoce) => {
+    const placa = document.createElement('a-plane');
+    placa.setAttribute('width', 2.2);
+    placa.setAttribute('height', 0.17);
+    placa.setAttribute('color', ehVoce ? '#b7f7d8' : '#e9edf2');
+    placa.setAttribute('position', `0 ${y} 0`);
+    cont.appendChild(placa);
+
+    const medalha = document.createElement('a-circle');
+    medalha.setAttribute('radius', 0.08);
+    medalha.setAttribute('segments', 20);
+    medalha.setAttribute('color', MEDALHAS[posicao] || '#118ab2');
+    medalha.setAttribute('position', `-0.95 ${y} 0.005`);
+    cont.appendChild(medalha);
+
+    const num = document.createElement('a-text');
+    num.setAttribute('value', String(posicao + 1));
+    num.setAttribute('align', 'center');
+    num.setAttribute('color', posicao < 3 ? '#073b4c' : '#ffffff');
+    num.setAttribute('width', 2.4);
+    num.setAttribute('position', `-0.95 ${y} 0.01`);
+    cont.appendChild(num);
+
+    const nome = document.createElement('a-text');
+    nome.setAttribute('value', ehVoce ? `${r.nome} (voce)` : r.nome);
+    nome.setAttribute('align', 'left');
+    nome.setAttribute('color', '#073b4c');
+    nome.setAttribute('width', 2.2);
+    nome.setAttribute('position', `-0.78 ${y} 0.01`);
+    cont.appendChild(nome);
+
+    const pts = document.createElement('a-text');
+    pts.setAttribute('value', `${r.pontos} pts`);
+    pts.setAttribute('align', 'right');
+    pts.setAttribute('color', '#118ab2');
+    pts.setAttribute('width', 2.2);
+    pts.setAttribute('position', `1.02 ${y} 0.01`);
+    cont.appendChild(pts);
+  };
+
+  if (destaque >= 5) {
+    // top 4, reticências e a linha do jogador
+    rank.slice(0, 4).forEach((r, i) => linha(i, r, 0.2 - i * 0.19, false));
+    const retic = document.createElement('a-text');
+    retic.setAttribute('value', '...');
+    retic.setAttribute('align', 'center');
+    retic.setAttribute('color', '#073b4c');
+    retic.setAttribute('width', 2.4);
+    retic.setAttribute('position', '0 -0.55 0.01');
+    cont.appendChild(retic);
+    const eu = rank[destaque] || { nome: nomeJogador, pontos };
+    linha(destaque, eu, -0.68, true);
+  } else {
+    rank.slice(0, 5).forEach((r, i) => linha(i, r, 0.2 - i * 0.19, i === destaque));
+  }
+  return cont;
 }
 
 function botaoTecla(pai, x, y, rotulo, largura, cor, aoClicar) {
@@ -164,7 +286,7 @@ function atualizarNomeDisplay() {
 }
 
 function aoTeclarNome(e) {
-  if (!$('telaInicio')) return;
+  if (!$('nomeDisplay')) return; // só na vista de digitar o nome
   if (/^[a-zA-Z]$/.test(e.key) && nomeJogador.length < TAM_MAX_NOME) {
     nomeJogador += e.key.toUpperCase();
     atualizarNomeDisplay();
@@ -453,15 +575,12 @@ function mostrarPergunta() {
   $('imgPergunta').setAttribute('visible', true);
   $('status').setAttribute('value', `Casa ${casaAtual + 1} de ${perguntas.length}`);
 
-  const aviso = $('aviso');
   if (tipo === 'bonus') {
-    aviso.setAttribute('value', 'CASA BÔNUS: acerto vale 2 pontos!');
-    aviso.setAttribute('color', '#f8961e');
+    definirAviso(`CASA BÔNUS: acerto vale ${PONTOS_ACERTO_BONUS} pontos!`, '#f8961e', true);
   } else if (tipo === 'dica') {
-    aviso.setAttribute('value', 'CASA DICA: eliminei alternativas erradas!');
-    aviso.setAttribute('color', '#0096c7');
+    definirAviso('CASA DICA: eliminei alternativas erradas!', '#0096c7', true);
   } else {
-    aviso.setAttribute('value', '');
+    definirAviso('', '#f8961e', false);
   }
 
   // "pop" do painel ao trocar de pergunta
@@ -528,9 +647,9 @@ function responder(letra, botao) {
     acertos++;
     $('status').setAttribute('value', `Correto! +${ganho} ponto${ganho > 1 ? 's' : ''}`);
   } else {
-    pontos -= PONTOS_ERRO;
+    pontos += PONTOS_ERRO_GANHO;
     erros++;
-    $('status').setAttribute('value', `Errou! -${PONTOS_ERRO} pontos. Voltando...`);
+    $('status').setAttribute('value', `Errou! Mas leva +${PONTOS_ERRO_GANHO} ponto. Voltando...`);
   }
   atualizarPlacar();
 
@@ -595,28 +714,17 @@ function fimDeJogo() {
   atualizarPlacar();
   $('imgPergunta').setAttribute('visible', false);
   $('statusBar').setAttribute('visible', false);
-  $('aviso').setAttribute('value', '');
+  definirAviso('', '#f8961e', false);
 
   const posicao = salvarNoRank();
-  const rank = carregarRank();
-  const linhas = [
-    `Fim de jogo, ${nomeJogador}!`,
-    `Pontos: ${pontos}   Acertos: ${acertos}   Erros: ${erros}`,
-    '',
-    '======= RANK =======',
-  ];
-  rank.slice(0, 5).forEach((r, i) => {
-    const voce = i === posicao ? '  <- voce' : '';
-    linhas.push(`${i + 1}. ${r.nome}  ${r.pontos} pts${voce}`);
-  });
-  if (posicao >= 5) {
-    linhas.push('...');
-    linhas.push(`${posicao + 1}. ${nomeJogador}  ${pontos} pts  <- voce`);
-  }
-  $('status').setAttribute('value', linhas.join('\n'));
-  $('status').setAttribute('position', '0 0.05 0.02');
+  $('status').setAttribute('value', `Fim de jogo, ${nomeJogador}!\nPontos: ${pontos}   Acertos: ${acertos}   Erros: ${erros}`);
+  $('status').setAttribute('position', '0 0.68 0.02');
   $('status').setAttribute('color', '#073b4c');
-  $('status').setAttribute('width', 2);
+  $('status').setAttribute('width', 2.2);
+
+  const quadro = montarPainelRank(posicao);
+  quadro.setAttribute('position', '0 -0.14 0.02');
+  $('painel').appendChild(quadro);
 
   const botoes = $('botoes');
   botoes.innerHTML = '';
