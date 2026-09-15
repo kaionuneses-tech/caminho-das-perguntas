@@ -36,6 +36,7 @@ const RANK_KEY = 'cdp-rank';
 const NOME_KEY = 'cdp-nome';
 const TAM_MAX_NOME = 10;
 const TAM_MAX_RANK = 20;
+const CODIGO_MESTRE = 'MESTRE';   // digite como nome + JOGAR pra abrir o modo mestre
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,10 +67,9 @@ function carregarRank() {
   }
 }
 
-// Insere o resultado atual no rank e devolve a posição (0 = primeiro lugar)
-function salvarNoRank() {
+// Insere uma entrada no rank e devolve a posição dela (0 = primeiro lugar)
+function salvarEntradaRank(entrada) {
   const rank = carregarRank();
-  const entrada = { nome: nomeJogador, pontos, acertos, erros, quando: Date.now() };
   rank.push(entrada);
   rank.sort((a, b) => b.pontos - a.pontos || b.acertos - a.acertos || a.quando - b.quando);
   const posicao = rank.indexOf(entrada);
@@ -77,6 +77,11 @@ function salvarNoRank() {
     localStorage.setItem(RANK_KEY, JSON.stringify(rank.slice(0, TAM_MAX_RANK)));
   } catch (e) { /* modo privado etc. */ }
   return posicao;
+}
+
+// Insere o resultado da partida atual no rank
+function salvarNoRank() {
+  return salvarEntradaRank({ nome: nomeJogador, pontos, acertos, erros, quando: Date.now() });
 }
 
 // ---------- Tela inicial: nome + teclado em VR + rank ----------
@@ -137,10 +142,16 @@ function mostrarVistaNome() {
   tela.appendChild(nome);
   atualizarNomeDisplay();
 
-  // teclado A-Z
+  criarTeclado(tela, 0.18);
+  botaoTecla(tela, -0.35, -0.78, 'JOGAR', 0.85, '#06d6a0', iniciarJogo);
+  botaoTecla(tela, 0.55, -0.78, 'VER RANK', 0.7, '#f8961e', mostrarVistaRank);
+}
+
+// Teclado A-Z + APAGAR, com a primeira linha em yTopo
+function criarTeclado(tela, yTopo) {
   const linhas = ['ABCDEFG', 'HIJKLMN', 'OPQRSTU', 'VWXYZ'];
   linhas.forEach((linha, li) => {
-    const y = 0.18 - li * 0.24;
+    const y = yTopo - li * 0.24;
     const x0 = -((linha.length - 1) * 0.24) / 2;
     [...linha].forEach((letra, ci) => {
       botaoTecla(tela, x0 + ci * 0.24, y, letra, 0.2, '#118ab2', () => {
@@ -151,12 +162,89 @@ function mostrarVistaNome() {
       });
     });
   });
-  botaoTecla(tela, 0.82, -0.54, 'APAGAR', 0.5, '#ef476f', () => {
+  botaoTecla(tela, 0.82, yTopo - 0.72, 'APAGAR', 0.5, '#ef476f', () => {
     nomeJogador = nomeJogador.slice(0, -1);
     atualizarNomeDisplay();
   });
-  botaoTecla(tela, -0.35, -0.78, 'JOGAR', 0.85, '#06d6a0', iniciarJogo);
-  botaoTecla(tela, 0.55, -0.78, 'VER RANK', 0.7, '#f8961e', mostrarVistaRank);
+}
+
+// ---------- Modo mestre (escondido: digite MESTRE como nome e clique JOGAR) ----------
+// Permite colocar qualquer nome e pontuação no rank — e limpar o rank da turma.
+
+let pontosMestre = 500;
+
+function mostrarVistaMestre() {
+  const tela = $('telaInicio');
+  tela.innerHTML = '';
+  $('status').setAttribute('value', 'MODO MESTRE');
+  definirAviso('Monte uma entrada do rank do seu jeito', '#9b5de5', true);
+
+  const nome = document.createElement('a-text');
+  nome.setAttribute('id', 'nomeDisplay');
+  nome.setAttribute('align', 'center');
+  nome.setAttribute('color', '#9b5de5');
+  nome.setAttribute('width', 3.2);
+  nome.setAttribute('position', '0 0.58 0');
+  tela.appendChild(nome);
+  atualizarNomeDisplay();
+
+  criarTeclado(tela, 0.34);
+
+  // ajuste de pontos: -50 -10 [valor] +10 +50
+  const valor = document.createElement('a-text');
+  valor.setAttribute('id', 'pontosMestreDisplay');
+  valor.setAttribute('align', 'center');
+  valor.setAttribute('color', '#073b4c');
+  valor.setAttribute('width', 2.6);
+  valor.setAttribute('position', '0 -0.62 0');
+  tela.appendChild(valor);
+  const atualizarValor = () => valor.setAttribute('value', `${pontosMestre} pts`);
+  atualizarValor();
+  const ajustar = (delta) => () => { pontosMestre += delta; atualizarValor(); };
+  botaoTecla(tela, -0.95, -0.62, '-50', 0.34, '#ef476f', ajustar(-50));
+  botaoTecla(tela, -0.55, -0.62, '-10', 0.34, '#ef476f', ajustar(-10));
+  botaoTecla(tela, 0.55, -0.62, '+10', 0.34, '#06d6a0', ajustar(10));
+  botaoTecla(tela, 0.95, -0.62, '+50', 0.34, '#06d6a0', ajustar(50));
+
+  botaoTecla(tela, -0.8, -0.85, 'SALVAR', 0.62, '#06d6a0', () => {
+    salvarEntradaRank({
+      nome: nomeJogador || 'MESTRE',
+      pontos: pontosMestre,
+      acertos: 0,
+      erros: 0,
+      quando: Date.now(),
+    });
+    nomeJogador = '';
+    $('status').setAttribute('value', 'CAMINHO DAS PERGUNTAS');
+    mostrarRecordeNoAviso();
+    mostrarVistaRank();
+  });
+  botaoTecla(tela, 0.05, -0.85, 'LIMPAR RANK', 0.86, '#f8961e', function aoLimpar() {
+    const botao = this;
+    const texto = botao.querySelector('a-text');
+    if (texto.getAttribute('value') === 'LIMPAR RANK') {
+      // primeiro clique só pede confirmação
+      texto.setAttribute('value', 'CONFIRMA?');
+      botao.setAttribute('color', '#ef476f');
+    } else {
+      try { localStorage.removeItem(RANK_KEY); } catch (e) { /* ok */ }
+      mostrarRecordeNoAviso();
+      texto.setAttribute('value', 'LIMPAR RANK');
+      botao.setAttribute('color', '#f8961e');
+    }
+  });
+  botaoTecla(tela, 0.85, -0.85, 'VOLTAR', 0.55, '#118ab2', () => {
+    $('status').setAttribute('value', 'CAMINHO DAS PERGUNTAS');
+    mostrarRecordeNoAviso();
+    mostrarVistaNome();
+  });
+}
+
+function mostrarRecordeNoAviso() {
+  const rank = carregarRank();
+  definirAviso(rank.length
+    ? `RECORDE: ${rank[0].nome} com ${rank[0].pontos} pts`
+    : 'Seja o primeiro no rank!', '#f8961e', false);
 }
 
 // Vista 2 da tela inicial: quadro do rank
@@ -293,12 +381,17 @@ function aoTeclarNome(e) {
   } else if (e.key === 'Backspace') {
     nomeJogador = nomeJogador.slice(0, -1);
     atualizarNomeDisplay();
-  } else if (e.key === 'Enter') {
+  } else if (e.key === 'Enter' && !$('pontosMestreDisplay')) {
     iniciarJogo();
   }
 }
 
 function iniciarJogo() {
+  if (nomeJogador === CODIGO_MESTRE) {
+    nomeJogador = '';
+    mostrarVistaMestre();
+    return;
+  }
   if (!nomeJogador) nomeJogador = 'JOGADOR';
   try { localStorage.setItem(NOME_KEY, nomeJogador); } catch (e) { /* ok */ }
   window.removeEventListener('keydown', aoTeclarNome);
